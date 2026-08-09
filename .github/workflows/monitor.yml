@@ -57,7 +57,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_DURATION_HOURS: ${{ github.event.inputs.duration_hours }}
-        run: python scripts/monitor.py
+        run: python -u scripts/monitor.py
 
       - name: Commit final state
         run: |
