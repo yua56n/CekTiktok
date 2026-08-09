@@ -1,0 +1,68 @@
+name: TikTok Monitor
+
+on:
+  # Trigger AWAL — dipicu dari luar (cron eksternal kamu) lewat GitHub API,
+  # BUKAN lewat `schedule:` (sengaja tidak dipakai karena tidak presisi waktu).
+  workflow_dispatch:
+    inputs:
+      duration_hours:
+        description: "Durasi window monitoring (jam)"
+        required: false
+        default: "10"
+
+  # Trigger LANJUTAN — dipicu oleh job itu sendiri saat mendekati limit 6 jam,
+  # untuk melanjutkan sisa window tanpa mengulang dari awal.
+  repository_dispatch:
+    types: [continue-monitor]
+
+permissions:
+  contents: write   # supaya bisa commit & push state.json balik ke repo
+  actions: write     # supaya job bisa memicu repository_dispatch (self-chaining)
+
+concurrency:
+  group: tiktok-monitor
+  cancel-in-progress: false  # jangan saling cancel antar run yang chaining
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355   # ~5 jam 55 menit, di bawah batas keras 6 jam GitHub
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium
+
+      - name: Install dependencies
+        run: |
+          pip install -r scripts/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TIKTOK_USERNAME: ${{ vars.TIKTOK_USERNAME }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DURATION_HOURS: ${{ github.event.inputs.duration_hours }}
+        run: python scripts/monitor.py
+
+      - name: Commit final state
+        run: |
+          git config user.name "tiktok-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "chore: update monitor state [skip ci]"
+          git push
